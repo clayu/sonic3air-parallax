@@ -95,8 +95,9 @@ GameView::~GameView()
 void GameView::updateGameViewport()
 {
 	const Configuration& config = Configuration::instance();
-	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
-	mGameViewport.setResolution(gameScreenRect.getSize());
+	const Vec2i displaySize = VideoOut::instance().getActiveDisplaySize();
+	const Recti gameScreenRect = Recti(Vec2i(0, 0), displaySize);
+	mGameViewport.setResolution(displaySize);
 
 	switch (config.mUpscaling)
 	{
@@ -574,7 +575,8 @@ void GameView::render()
 	const Configuration& config = Configuration::instance();
 	Drawer& drawer = EngineMain::instance().getDrawer();
 	VideoOut& videoOut = VideoOut::instance();
-	const Recti gameScreenRect = VideoOut::instance().getScreenRect();
+	const Vec2i activeSize = videoOut.getActiveDisplaySize();
+	const Recti gameScreenRect = Recti(Vec2i(0, 0), activeSize);
 	mGameViewport.setResolution(gameScreenRect.getSize());
 	mFinalGameTexture.setupAsRenderTarget(gameScreenRect.getSize());
 
@@ -627,11 +629,11 @@ void GameView::render()
 	// Simple mirror mode implementation: Just mirror the whole screen
 	if (config.mMirrorMode)
 	{
-		drawer.drawRect(gameScreenRect, videoOut.getGameScreenTexture(), Vec2f(1.0f, 0.0f), Vec2f(0.0f, 1.0f), Color::WHITE);
+		drawer.drawRect(gameScreenRect, videoOut.getActiveDisplayTexture(), Vec2f(1.0f, 0.0f), Vec2f(0.0f, 1.0f), Color::WHITE);
 	}
 	else
 	{
-		drawer.drawRect(gameScreenRect, videoOut.getGameScreenTexture());
+		drawer.drawRect(gameScreenRect, videoOut.getActiveDisplayTexture());
 	}
 
 	// Enable alpha for the UI
@@ -738,7 +740,34 @@ void GameView::render()
 	const Recti& gameViewportRect = mGameViewport.getRectOnScreen();
 	drawer.setWindowRenderTarget(FTX::screenRect());
 	drawer.setBlendMode(BlendMode::OPAQUE);
-	drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);
+
+	if (config.mStereoEyeSeparation > 0)
+	{
+		// Draw each panel into its own inset rect so black borders surround the content
+		const int b = 20;
+		const int x = gameViewportRect.x;
+		const int y = gameViewportRect.y;
+		const int w = gameViewportRect.width;
+		const int h = gameViewportRect.height;
+		const int halfW = w / 2;
+
+		const Recti leftDst (x + b,         y + b, halfW - 2 * b, h - 2 * b);
+		const Recti rightDst(x + halfW + b, y + b, halfW - 2 * b, h - 2 * b);
+
+		drawer.drawRect(leftDst,  mFinalGameTexture, Vec2f(0.0f, 0.0f), Vec2f(0.5f, 1.0f), Color::WHITE);
+		drawer.drawRect(rightDst, mFinalGameTexture, Vec2f(0.5f, 0.0f), Vec2f(1.0f, 1.0f), Color::WHITE);
+
+		// Fill border areas with black
+		drawer.drawRect(Recti(x, y, w, b), Color::BLACK);                          // top
+		drawer.drawRect(Recti(x, y + h - b, w, b), Color::BLACK);                 // bottom
+		drawer.drawRect(Recti(x, y, b, h), Color::BLACK);                          // left outer
+		drawer.drawRect(Recti(x + w - b, y, b, h), Color::BLACK);                 // right outer
+		drawer.drawRect(Recti(x + halfW - b, y, 2 * b, h), Color::BLACK);         // center divider
+	}
+	else
+	{
+		drawer.drawUpscaledRect(gameViewportRect, mFinalGameTexture);
+	}
 
 	if (!FTX::Video->getVideoConfig().mAutoClearScreen)
 	{

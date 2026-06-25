@@ -26,6 +26,23 @@ function void onUpdateFrame()
 }
 
 
+// Called from C++ stereo rendering: re-runs only the scroll offset update (Part 2 of
+// UpdateLevelDisplay) using whatever camera.position.x is currently set in RAM.
+// Does NOT run the tile update (Part 1) to avoid side effects.
+function void StereoScrollUpdate()
+{
+	camera.foreground.x.u16 = camera.position.x.u16
+	camera.foreground.y.u16 = camera.position.y.u16
+
+	A3 = 0xffff800a
+	D7.u16 = 0xe000
+
+	u16 offset = global.zone * 32 + global.act * 8
+	A1 = u32[0x04e46c + offset]
+	call A1
+}
+
+
 function void waitForNextFrame()
 {
 	jump 0x001d18

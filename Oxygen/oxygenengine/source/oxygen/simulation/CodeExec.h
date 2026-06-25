@@ -127,12 +127,13 @@ public:
 	inline CallFrameTracking* getActiveCallFrameTracking()  { return mActiveCallFrameTracking; }
 	inline DebugTracking& getDebugTracking()  { return mDebugTracking; }
 
+	bool executeRuntimeSteps(size_t& stepsExecuted, size_t minimumCallStackSize);
+
 private:
 	bool canExecute() const;
 	bool hasValidState() const;
 	void runScript(bool executeSingleFunction, CallFrameTracking* callFrameTracking);
 
-	bool executeRuntimeSteps(size_t& stepsExecuted, size_t minimumCallStackSize);
 	bool executeRuntimeStepsDev(size_t& stepsExecuted, size_t minimumCallStackSize);
 
 	bool tryCallAddressHook(uint32 address);

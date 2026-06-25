@@ -691,7 +691,8 @@ bool EngineMain::createWindow()
 	const bool useOpenGL = (config.mRenderMethod == Configuration::RenderMethod::OPENGL_FULL) || (config.mRenderMethod == Configuration::RenderMethod::OPENGL_SOFT);
 
 	// Setup video config
-	rmx::VideoConfig videoConfig(config.mWindowMode != Configuration::WindowMode::WINDOWED, config.mWindowSize.x, config.mWindowSize.y, appMetaData.mTitle.c_str());
+	const int windowWidth = (config.mStereoEyeSeparation > 0) ? config.mWindowSize.x * 2 : config.mWindowSize.x;
+	rmx::VideoConfig videoConfig(config.mWindowMode != Configuration::WindowMode::WINDOWED, windowWidth, config.mWindowSize.y, appMetaData.mTitle.c_str());
 	videoConfig.mRenderer = useOpenGL ? rmx::VideoConfig::Renderer::OPENGL : rmx::VideoConfig::Renderer::SOFTWARE;
 	videoConfig.mResizeable = true;
 	videoConfig.mAutoClearScreen = useOpenGL;
