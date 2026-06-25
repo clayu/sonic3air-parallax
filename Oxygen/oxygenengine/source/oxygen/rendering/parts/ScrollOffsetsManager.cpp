@@ -236,6 +236,61 @@ void ScrollOffsetsManager::overwriteScrollOffsetV(int setIndex, int index, uint1
 	set.mExplicitOverwriteV[index] = true;
 }
 
+void ScrollOffsetsManager::shiftAllScrollOffsetsH(int fgShift, const int* bgShifts)
+{
+	// Sets 1 and 3 (Plane A): always get fgShift
+	for (int s : { 1, 3 })
+	{
+		uint16* buf = mSets[s].mScrollOffsetsH;
+		for (int k = 0; k < 0x100; ++k)
+			buf[k] = (uint16)(buf[k] + fgShift) & SCROLL_OFFSET_VALUE_BITMASK;
+		if (mInterpolatedSets[s].mValid)
+		{
+			uint16* ibuf = mInterpolatedSets[s].mInterpolatedScrollOffsetsH;
+			for (int k = 0; k < 0x100; ++k)
+				ibuf[k] = (uint16)(ibuf[k] + fgShift) & SCROLL_OFFSET_VALUE_BITMASK;
+		}
+	}
+
+	// Sets 0 and 2 (Plane B): always get per-scanline bgShifts.
+	// The velocity ratio already encodes co-scroll (ratio≈1 → bgShifts≈fgShift) vs
+	// parallax (ratio<1) vs static BG (ratio=0 → bgShifts=0, appears at screen surface
+	// behind the forward-shifted Plane A).
+	for (int s : { 0, 2 })
+	{
+		uint16* buf = mSets[s].mScrollOffsetsH;
+		for (int k = 0; k < 0x100; ++k)
+			buf[k] = (uint16)(buf[k] + bgShifts[k]) & SCROLL_OFFSET_VALUE_BITMASK;
+		if (mInterpolatedSets[s].mValid)
+		{
+			uint16* ibuf = mInterpolatedSets[s].mInterpolatedScrollOffsetsH;
+			for (int k = 0; k < 0x100; ++k)
+				ibuf[k] = (uint16)(ibuf[k] + bgShifts[k]) & SCROLL_OFFSET_VALUE_BITMASK;
+		}
+	}
+}
+
+void ScrollOffsetsManager::saveScrollOffsetsH(StereoScrollSnapshot& out) const
+{
+	for (int s = 0; s < 4; ++s)
+	{
+		memcpy(out.base[s], mSets[s].mScrollOffsetsH, sizeof(mSets[s].mScrollOffsetsH));
+		out.interpValid[s] = mInterpolatedSets[s].mValid;
+		if (out.interpValid[s])
+			memcpy(out.interp[s], mInterpolatedSets[s].mInterpolatedScrollOffsetsH, sizeof(mInterpolatedSets[s].mInterpolatedScrollOffsetsH));
+	}
+}
+
+void ScrollOffsetsManager::restoreScrollOffsetsH(const StereoScrollSnapshot& in)
+{
+	for (int s = 0; s < 4; ++s)
+	{
+		memcpy(mSets[s].mScrollOffsetsH, in.base[s], sizeof(mSets[s].mScrollOffsetsH));
+		if (in.interpValid[s])
+			memcpy(mInterpolatedSets[s].mInterpolatedScrollOffsetsH, in.interp[s], sizeof(mInterpolatedSets[s].mInterpolatedScrollOffsetsH));
+	}
+}
+
 const uint16* ScrollOffsetsManager::getScrollOffsetsH(int setIndex) const
 {
 	if (setIndex == 0xff)

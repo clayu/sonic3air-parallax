@@ -10,6 +10,7 @@
 
 #include "oxygen/drawing/DrawerTexture.h"
 #include "oxygen/rendering/Geometry.h"
+#include "oxygen/rendering/parts/ScrollOffsetsManager.h"
 
 class Renderer;
 class OpenGLRenderer;
@@ -68,6 +69,8 @@ public:
 	inline const std::vector<Geometry*>& getGeometries() const  { return mGeometries; }
 
 	inline DrawerTexture& getGameScreenTexture()  { return mGameScreenTexture; }
+	DrawerTexture& getActiveDisplayTexture();
+	Vec2i getActiveDisplaySize() const;
 	void getScreenshot(Bitmap& outBitmap);
 
 private:
@@ -75,6 +78,11 @@ private:
 	void collectGeometries(std::vector<Geometry*>& geometries);
 
 	void renderGameScreen();
+	void renderGameScreenStereo();
+
+#ifdef RMX_WITH_OPENGL_SUPPORT
+	void setupStereoBuffers();
+#endif
 
 private:
 	enum class FrameState
@@ -101,7 +109,14 @@ private:
 
 	RenderParts* mRenderParts = nullptr;
 	DrawerTexture mGameScreenTexture;
+	DrawerTexture mStereoTexture;
 	RenderResources& mRenderResources;
+
+#ifdef RMX_WITH_OPENGL_SUPPORT
+	unsigned int mStereoReadFBOHandle = 0;
+	unsigned int mStereoWriteFBOHandle = 0;
+	bool mStereoBuffersReady = false;
+#endif
 
 	Vec2i mGameResolution;
 	FrameState mFrameState = FrameState::OUTSIDE_FRAME;
@@ -116,4 +131,16 @@ private:
 	bool mDebugDrawRenderingRequested = false;
 	bool mPreviouslyHadNewRenderItems = false;
 	bool mRequireGameScreenUpdate = false;
+
+	// Stereo: per-scanline parallax ratio state
+	ScrollOffsetsManager::StereoScrollSnapshot mPrevStereoScrollH;
+	bool   mPrevStereoScrollValid = false;
+	float  mCachedBgRatios[0x100] = {};	// last computed per-scanline bg/fg ratio
+
+	// Stereo debug visualization (= key)
+	bool mStereoDebugMode = false;
+	std::vector<uint8> mStereoDebugBuffer;
+
+public:
+	inline bool toggleStereoDebugMode() { return (mStereoDebugMode = !mStereoDebugMode); }
 };

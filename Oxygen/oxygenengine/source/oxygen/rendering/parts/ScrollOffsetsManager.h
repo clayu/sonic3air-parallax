@@ -40,6 +40,17 @@ public:
 	void overwriteScrollOffsetH(int setIndex, int index, uint16 value);
 	void overwriteScrollOffsetV(int setIndex, int index, uint16 value);
 
+	struct StereoScrollSnapshot
+	{
+		uint16 base[4][0x100]   = {};
+		uint16 interp[4][0x100] = {};
+		bool   interpValid[4]   = {};
+	};
+
+	void shiftAllScrollOffsetsH(int fgShift, const int* bgShifts);
+	void saveScrollOffsetsH(StereoScrollSnapshot& out) const;
+	void restoreScrollOffsetsH(const StereoScrollSnapshot& in);
+
 	const uint16* getScrollOffsetsH(int setIndex) const;
 	const uint16* getScrollOffsetsV(int setIndex) const;
 

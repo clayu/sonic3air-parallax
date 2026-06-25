@@ -216,6 +216,8 @@ public:
 	int   mBackdrop = 0;
 	int   mBackgroundBlur = 0;
 	int   mPerformanceDisplay = 0;
+	int   mStereoEyeSeparation = 0;		// Pixels; 0 = stereo disabled
+	int   mStereoCameraDebugOffset = 0;	// Runtime debug: pan both cameras left/right together
 
 	// Screen filter
 	ScreenFilter mScreenFilter;

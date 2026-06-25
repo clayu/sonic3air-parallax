@@ -11,15 +11,19 @@
 #include "oxygen/application/Configuration.h"
 #include "oxygen/application/EngineMain.h"
 #include "oxygen/drawing/opengl/OpenGLDrawer.h"
+#include "oxygen/drawing/opengl/OpenGLDrawerTexture.h"
 #include "oxygen/helper/Logging.h"
 #include "oxygen/rendering/Geometry.h"
 #include "oxygen/rendering/RenderResources.h"
 #include "oxygen/rendering/opengl/OpenGLRenderer.h"
-#include "oxygen/rendering/software/SoftwareRenderer.h"
 #include "oxygen/rendering/parts/RenderParts.h"
+#include "oxygen/rendering/software/SoftwareRenderer.h"
 #include "oxygen/resources/FontCollection.h"
+#include "oxygen/simulation/CodeExec.h"
 #include "oxygen/simulation/EmulatorInterface.h"
+#include "oxygen/simulation/LemonScriptRuntime.h"
 #include "oxygen/simulation/LogDisplay.h"
+#include "oxygen/application/Application.h"
 #include "oxygen/simulation/Simulation.h"
 
 
@@ -251,6 +255,22 @@ std::string VideoOut::getLayerRenderingDebugString() const
 void VideoOut::getScreenshot(Bitmap& outBitmap)
 {
 	mGameScreenTexture.writeContentToBitmap(outBitmap);
+}
+
+DrawerTexture& VideoOut::getActiveDisplayTexture()
+{
+#ifdef RMX_WITH_OPENGL_SUPPORT
+	if (Configuration::instance().mStereoEyeSeparation > 0 && mStereoBuffersReady)
+		return mStereoTexture;
+#endif
+	return mGameScreenTexture;
+}
+
+Vec2i VideoOut::getActiveDisplaySize() const
+{
+	if (Configuration::instance().mStereoEyeSeparation > 0)
+		return Vec2i(mGameResolution.x * 2, mGameResolution.y);
+	return mGameResolution;
 }
 
 void VideoOut::clearGeometries()
@@ -490,16 +510,218 @@ void VideoOut::collectGeometries(std::vector<Geometry*>& geometries)
 
 void VideoOut::renderGameScreen()
 {
-	// Collect geometries to render
+#ifdef RMX_WITH_OPENGL_SUPPORT
+	if (Configuration::instance().mStereoEyeSeparation > 0 && mActiveRenderer == mOpenGLRenderer)
+	{
+		renderGameScreenStereo();
+		return;
+	}
+#endif
+
+	// Normal single-eye render
 	clearGeometries();
 	if (mRenderParts->getActiveDisplay())
-	{
 		collectGeometries(mGeometries);
-	}
-
-	// Render them
 	mActiveRenderer->renderGameScreen(mGeometries);
 }
+
+#ifdef RMX_WITH_OPENGL_SUPPORT
+void VideoOut::setupStereoBuffers()
+{
+	if (mStereoBuffersReady)
+		return;
+
+	// Create the 2x-wide stereo output texture
+	mStereoTexture.setupAsRenderTarget(Vec2i(mGameResolution.x * 2, mGameResolution.y));
+
+	GLuint gameTexHandle  = mGameScreenTexture.getImplementation<OpenGLDrawerTexture>()->getTextureHandle();
+	GLuint stereoTexHandle = mStereoTexture.getImplementation<OpenGLDrawerTexture>()->getTextureHandle();
+
+	// Read FBO: reads from the game screen texture (same texture the renderer writes to)
+	glGenFramebuffers(1, &mStereoReadFBOHandle);
+	glBindFramebuffer(GL_FRAMEBUFFER, mStereoReadFBOHandle);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gameTexHandle, 0);
+
+	// Write FBO: writes to the 2x-wide stereo texture
+	glGenFramebuffers(1, &mStereoWriteFBOHandle);
+	glBindFramebuffer(GL_FRAMEBUFFER, mStereoWriteFBOHandle);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, stereoTexHandle, 0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	mStereoBuffersReady = true;
+}
+
+void VideoOut::renderGameScreenStereo()
+{
+	setupStereoBuffers();
+
+	ScrollOffsetsManager& scrollMgr = mRenderParts->getScrollOffsetsManager();
+
+	// Save scroll offsets (base + interpolated) so we can restore them after both eyes
+	ScrollOffsetsManager::StereoScrollSnapshot savedScrollH;
+	scrollMgr.saveScrollOffsetsH(savedScrollH);
+
+	const int sep = Configuration::instance().mStereoEyeSeparation;
+
+	// Per-scanline velocity-based parallax ratio:
+	// Compare Plane B (set 0) and Plane A (set 1) scroll deltas frame-to-frame.
+	// Where bg moves slower than fg the ratio < 1 → less depth shift for that scanline.
+	if (!mPrevStereoScrollValid)
+	{
+		// First frame: seed ratios to 0.5 so debug pan shows parallax immediately
+		for (int k = 0; k < 0x100; ++k)
+			mCachedBgRatios[k] = 0.5f;
+	}
+	else
+	{
+		// Average fg velocity across all scanlines
+		float fgAvg = 0.0f;
+		for (int k = 0; k < 0x100; ++k)
+			fgAvg += (int16)(savedScrollH.base[1][k] - mPrevStereoScrollH.base[1][k]);
+		fgAvg /= 0x100;
+
+		if (fabsf(fgAvg) > 0.5f)
+		{
+			for (int k = 0; k < 0x100; ++k)
+			{
+				const float bgDelta = (float)(int16)(savedScrollH.base[0][k] - mPrevStereoScrollH.base[0][k]);
+				mCachedBgRatios[k] = clamp(bgDelta / fgAvg, 0.0f, 1.0f);
+			}
+		}
+		// If fgAvg ≈ 0 (standing still), keep mCachedBgRatios as-is from last moving frame
+	}
+	mPrevStereoScrollH   = savedScrollH;
+	mPrevStereoScrollValid = true;
+
+	// Pass 0 = right-eye view (camera + sep/2) → left panel
+	// Pass 1 = left-eye  view (camera - sep/2) → right panel
+	for (int eye = 0; eye < 2; ++eye)
+	{
+		const int shift  = (eye == 0) ? (sep / 2) : -(sep / 2);
+		const int panelX = (eye == 0) ? 0 : mGameResolution.x;
+
+		const int debugOffset = Configuration::instance().mStereoCameraDebugOffset;
+		const int totalShift = shift + debugOffset;
+
+		// Plane A (floor, walls, near BG) gets the full stereo shift.
+		// Sprites are not touched — they sit flat at screen surface.
+		// Plane B is scaled by velocity ratio relative to Plane A so it always appears behind it.
+		const int fgShift = totalShift;
+
+		int eyeBgShifts[0x100];
+		for (int k = 0; k < 0x100; ++k)
+			eyeBgShifts[k] = roundToInt((float)totalShift * mCachedBgRatios[k]);
+
+		// Restore saved offsets then apply per-scanline per-plane eye shifts
+		scrollMgr.restoreScrollOffsetsH(savedScrollH);
+		scrollMgr.shiftAllScrollOffsetsH(fgShift, eyeBgShifts);
+
+		// Render this eye into mGameScreenTexture.
+		clearGeometries();
+		if (mRenderParts->getActiveDisplay())
+			collectGeometries(mGeometries);
+
+		// Shift every sprite (world-space, screen-space, HUD) by the same camera shift
+		// so sprites, Plane A tiles, and HUD all sit at the same visual depth layer.
+		SpriteManager& spriteMgr = mRenderParts->getSpriteManager();
+		for (int ctx = 0; ctx < RenderItem::NUM_LIFETIME_CONTEXTS; ++ctx)
+		{
+			for (RenderItem* item : spriteMgr.getRenderItems((RenderItem::LifetimeContext)ctx))
+			{
+				if (!item->isSprite())
+					continue;
+				static_cast<renderitems::SpriteInfo*>(item)->mInterpolatedPosition.x -= fgShift;
+			}
+		}
+
+		mActiveRenderer->renderGameScreen(mGeometries);
+
+		// Blit the rendered eye into the correct half of the stereo texture
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, mStereoReadFBOHandle);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, mStereoWriteFBOHandle);
+		glBlitFramebuffer(
+			0,       0, mGameResolution.x,          mGameResolution.y,
+			panelX,  0, panelX + mGameResolution.x, mGameResolution.y,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST
+		);
+	}
+
+	// Restore original scroll offsets
+	scrollMgr.restoreScrollOffsetsH(savedScrollH);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	// Debug subtraction view (= key): shift-corrected difference between eyes.
+	// A = left panel (right eye) at x; B = right panel (left eye) at x+sep.
+	// For player-depth content A≈B → white. A>B → orange (in front). A<B → blue (behind).
+	if (mStereoDebugMode)
+	{
+		const int w = mGameResolution.x;
+		const int h = mGameResolution.y;
+
+		mStereoDebugBuffer.resize(w * 2 * h * 4);
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, mStereoWriteFBOHandle);
+		glReadPixels(0, 0, w * 2, h, GL_RGBA, GL_UNSIGNED_BYTE, mStereoDebugBuffer.data());
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+		std::vector<uint8> composite(w * h * 4);
+		for (int y = 0; y < h; ++y)
+		{
+			for (int x = 0; x < w; ++x)
+			{
+				const uint8* A = &mStereoDebugBuffer[(y * w * 2 + x) * 4];
+				const float aLum = (A[0] * 0.299f + A[1] * 0.587f + A[2] * 0.114f) / 255.0f;
+
+				float bLum = 0.0f;
+				const int bx = x + sep;  // compareOffset = sep: full Plane A shift for both eyes
+				if (bx < w)
+				{
+					const uint8* B = &mStereoDebugBuffer[(y * w * 2 + w + bx) * 4];
+					bLum = (B[0] * 0.299f + B[1] * 0.587f + B[2] * 0.114f) / 255.0f;
+				}
+
+				const float total = (aLum + bLum) * 0.5f;
+				const float diff  = (aLum - bLum) * 6.0f;
+
+				uint8* out = &composite[(y * w + x) * 4];
+				out[3] = 0xff;
+
+				if (total < 0.015f)
+				{
+					out[0] = out[1] = out[2] = 0;
+				}
+				else if (diff > 0.15f)
+				{
+					// In front: orange
+					const uint8 v = (uint8)(std::min(diff, 1.0f) * 255.0f);
+					out[0] = v;
+					out[1] = v / 2;
+					out[2] = 0;
+				}
+				else if (diff < -0.15f)
+				{
+					// Behind: blue
+					const uint8 v = (uint8)(std::min(-diff, 1.0f) * 255.0f);
+					out[0] = 0;
+					out[1] = v / 4;
+					out[2] = v;
+				}
+				else
+				{
+					// Player depth: white/gray
+					const uint8 g = (uint8)(total * 255.0f);
+					out[0] = out[1] = out[2] = g;
+				}
+			}
+		}
+
+		OpenGLDrawerTexture* stereoImpl = mStereoTexture.getImplementation<OpenGLDrawerTexture>();
+		glBindTexture(GL_TEXTURE_2D, stereoImpl->getTextureHandle());
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, composite.data());
+		glTexSubImage2D(GL_TEXTURE_2D, 0, w, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, composite.data());
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+}
+#endif
 
 void VideoOut::preRefreshDebugging()
 {

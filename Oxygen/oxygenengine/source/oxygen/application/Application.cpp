@@ -428,6 +428,16 @@ void Application::keyboard(const rmx::KeyboardEvent& ev)
 						break;
 					}
 
+					case '=':
+					{
+						if (EngineMain::getDelegate().useDeveloperFeatures() && Configuration::instance().mStereoEyeSeparation > 0)
+						{
+							const bool on = VideoOut::instance().toggleStereoDebugMode();
+							LogDisplay::instance().setLogDisplay(on ? "Stereo debug: ON" : "Stereo debug: OFF");
+						}
+						break;
+					}
+
 				#ifdef DEBUG
 					case 'r':
 					{
@@ -447,6 +457,30 @@ void Application::keyboard(const rmx::KeyboardEvent& ev)
 			// Key repeat is fine for these
 			switch (ev.key)
 			{
+				case '[':
+				case ']':
+				{
+					if (EngineMain::getDelegate().useDeveloperFeatures())
+					{
+						Configuration& cfg = Configuration::instance();
+						cfg.mStereoEyeSeparation = clamp(cfg.mStereoEyeSeparation + (ev.key == ']' ? 1 : -1), 0, 32);
+						LogDisplay::instance().setLogDisplay(String(0, "Stereo separation: %d", cfg.mStereoEyeSeparation));
+					}
+					break;
+				}
+
+				case ';':
+				case '\'':
+				{
+					if (EngineMain::getDelegate().useDeveloperFeatures() && Configuration::instance().mStereoEyeSeparation > 0)
+					{
+						Configuration& cfg = Configuration::instance();
+						cfg.mStereoCameraDebugOffset += (ev.key == '\'' ? 1 : -1);
+						LogDisplay::instance().setLogDisplay(String(0, "Stereo camera offset: %d", cfg.mStereoCameraDebugOffset));
+					}
+					break;
+				}
+
 				case SDLK_KP_PLUS:
 				case SDLK_KP_MINUS:
 				{
@@ -792,7 +826,11 @@ void Application::setWindowMode(WindowMode windowMode, bool force)
 				SDL_SetWindowFullscreen(window, 0);
 			}
 
-			SDL_SetWindowSize(window, Configuration::instance().mWindowSize.x, Configuration::instance().mWindowSize.y);
+			{
+				const Configuration& cfg = Configuration::instance();
+				const int ww = (cfg.mStereoEyeSeparation > 0) ? cfg.mWindowSize.x * 2 : cfg.mWindowSize.x;
+				SDL_SetWindowSize(window, ww, cfg.mWindowSize.y);
+			}
 			SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex), SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex));
 			SDL_SetWindowResizable(window, SDL_TRUE);
 			SDL_SetWindowBordered(window, SDL_TRUE);

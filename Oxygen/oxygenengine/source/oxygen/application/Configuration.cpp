@@ -478,6 +478,7 @@ void Configuration::loadConfigurationProperties(JsonSerializer& serializer)
 	serializer.serialize("Upscaling", mUpscaling);
 	serializer.serialize("BackgroundBlur", mBackgroundBlur);
 	serializer.serialize("PerformanceDisplay", mPerformanceDisplay);
+	serializer.serialize("StereoEyeSeparation", mStereoEyeSeparation);
 	tryReadRenderMethod(serializer, mFailSafeMode, mRenderMethod, mAutoDetectRenderMethod);
 
 	// Input recorder
