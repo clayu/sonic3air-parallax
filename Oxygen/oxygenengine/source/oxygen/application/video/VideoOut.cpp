@@ -582,10 +582,14 @@ void VideoOut::renderGameScreenStereo()
 
 		if (fabsf(fgAvg) > 0.5f)
 		{
+			// Exponential smoothing (alpha=0.15) damps frame-to-frame ratio noise
+			// that would otherwise cause ±1px jitter on Plane B when running
+			static constexpr float kAlpha = 0.15f;
 			for (int k = 0; k < 0x100; ++k)
 			{
 				const float bgDelta = (float)(int16)(savedScrollH.base[0][k] - mPrevStereoScrollH.base[0][k]);
-				mCachedBgRatios[k] = clamp(bgDelta / fgAvg, 0.0f, 1.0f);
+				const float newRatio = clamp(bgDelta / fgAvg, 0.0f, 1.0f);
+				mCachedBgRatios[k] = mCachedBgRatios[k] * (1.0f - kAlpha) + newRatio * kAlpha;
 			}
 		}
 		// If fgAvg ≈ 0 (standing still), keep mCachedBgRatios as-is from last moving frame
