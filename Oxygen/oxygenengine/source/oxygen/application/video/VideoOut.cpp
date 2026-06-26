@@ -626,7 +626,7 @@ void VideoOut::renderGameScreenStereo()
 			collectGeometries(mGeometries);
 
 		// Shift every sprite (world-space, screen-space, HUD) by the same camera shift
-		// so sprites, Plane A tiles, and HUD all sit at the same visual depth layer.
+		// so sprites, Plane A Prio tiles, and HUD all sit at the same visual depth layer.
 		SpriteManager& spriteMgr = mRenderParts->getSpriteManager();
 		for (int ctx = 0; ctx < RenderItem::NUM_LIFETIME_CONTEXTS; ++ctx)
 		{
@@ -635,6 +635,19 @@ void VideoOut::renderGameScreenStereo()
 				if (!item->isSprite())
 					continue;
 				static_cast<renderitems::SpriteInfo*>(item)->mInterpolatedPosition.x -= fgShift;
+			}
+		}
+
+		// Plane A Normal sits just slightly behind sprites/Plane A Prio.
+		// Apply a negative x-adjust in the shader to reduce its effective shift.
+		static constexpr float kNormalPlaneARatio = 0.7f;
+		const int normalAdjust = roundToInt((float)fgShift * kNormalPlaneARatio) - fgShift;
+		for (Geometry* g : mGeometries)
+		{
+			if (g->getType() == Geometry::Type::PLANE)
+			{
+				PlaneGeometry* pg = static_cast<PlaneGeometry*>(g);
+				pg->mStereoXAdjust = (pg->mPlaneIndex == PlaneManager::PLANE_A && !pg->mPriorityFlag) ? normalAdjust : 0;
 			}
 		}
 

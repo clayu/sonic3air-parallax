@@ -33,11 +33,13 @@ void RenderPlaneShader::initialize(Variation variation)
 	{
 		bindShader();
 
-		mLocActiveRect		= mShader.getUniformLocation("ActiveRect");
-		mLocGameResolution	= mShader.getUniformLocation("GameResolution");
-		mLocPriorityFlag	= mShader.getUniformLocation("PriorityFlag");
-		mLocPaletteOffset	= mShader.getUniformLocation("PaletteOffset");
-		mLocPlayfieldSize	= mShader.getUniformLocation("PlayfieldSize");
+		mLocActiveRect		 = mShader.getUniformLocation("ActiveRect");
+		mLocGameResolution	 = mShader.getUniformLocation("GameResolution");
+		mLocPriorityFlag	 = mShader.getUniformLocation("PriorityFlag");
+		mLocPaletteOffset	 = mShader.getUniformLocation("PaletteOffset");
+		mLocPlayfieldSize	 = mShader.getUniformLocation("PlayfieldSize");
+		mLocStereoXAdjust	 = mShader.getUniformLocation("StereoXAdjust");
+		mShader.setParam(mLocStereoXAdjust, 0);
 
 		mShader.setParam("PatternCacheTexture", 0);
 		mShader.setParam("PaletteTexture", 1);
@@ -136,6 +138,8 @@ void RenderPlaneShader::draw(const PlaneGeometry& geometry, const Vec2i& gameRes
 			mShader.setParam(mLocPriorityFlag, geometry.mPriorityFlag ? 1 : 0);
 			mLastRenderedPlanePriority = geometry.mPriorityFlag;
 		}
+
+		mShader.setParam(mLocStereoXAdjust, geometry.mStereoXAdjust);
 	}
 
 	// Handle palette split inside the active rect

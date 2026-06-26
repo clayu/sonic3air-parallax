@@ -50,6 +50,7 @@ private:
 	GLuint mLocVScrollOffsetBias = 0;
 	GLuint mLocScrollOffsetX = 0;
 	GLuint mLocScrollOffsetY = 0;
+	GLuint mLocStereoXAdjust = 0;
 };
 
 #endif

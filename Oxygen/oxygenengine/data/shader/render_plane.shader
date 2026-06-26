@@ -51,6 +51,7 @@ uniform sampler2D PaletteTexture;
 uniform float PaletteOffset;
 uniform ivec4 PlayfieldSize;
 uniform int PriorityFlag;		// 0 or 1
+uniform int StereoXAdjust;		// Per-draw stereo depth correction (0 normally)
 
 #ifdef HORIZONTAL_SCROLLING
 	#ifdef USE_BUFFER_TEXTURES
@@ -125,7 +126,7 @@ void main()
 	int scrollOffsetLookupY = ScrollOffsetY;
 #endif
 
-	ix += scrollOffsetLookupX;
+	ix += scrollOffsetLookupX + StereoXAdjust;
 	iy += scrollOffsetLookupY;
 #ifdef GL_ES
 	ix = ix - int(ix / 0x1000) * 0x1000;
